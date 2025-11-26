@@ -73,6 +73,62 @@ def get_existing_lists() -> Dict[str, str]:
         return {}
 
 
+def get_existing_dns_policies() -> Dict[str, str]:
+    """
+    Get all existing DNS Gateway Rules/Policies.
+    Returns a dict mapping policy names to policy IDs.
+    """
+    url = f"{BASE_URL}/gateway/rules"
+    response = requests.get(url, headers=HEADERS)
+
+    if response.status_code == 200:
+        rules = response.json()["result"]
+        return {rule["name"]: rule["id"] for rule in rules}
+    else:
+        return {}
+
+
+def delete_existing_adguard_policy(auto_approve=False) -> bool:
+    """
+    Delete any existing AdGuard DNS policy.
+    This must be done BEFORE deleting lists, as lists referenced by policies cannot be deleted.
+
+    Returns True if a policy was deleted or none existed.
+    """
+    print("Checking for existing AdGuard DNS policy...")
+
+    existing_policies = get_existing_dns_policies()
+    adguard_policy_name = "Block AdGuard DNS Filter"
+
+    if adguard_policy_name in existing_policies:
+        policy_id = existing_policies[adguard_policy_name]
+        print(f"Found existing policy: {adguard_policy_name}")
+
+        if auto_approve:
+            print("Auto-approving policy deletion (--auto-approve enabled)")
+        else:
+            response = input("Delete this policy before proceeding? (yes/no): ").strip().lower()
+            if response not in ['yes', 'y']:
+                print("⚠️  Warning: Cannot delete lists while policy references them")
+                return False
+
+        url = f"{BASE_URL}/gateway/rules/{policy_id}"
+        del_response = requests.delete(url, headers=HEADERS)
+
+        if del_response.status_code == 200:
+            print(f"  ✅ Deleted policy: {adguard_policy_name}")
+            time.sleep(RATE_LIMIT_DELAY)  # Give API time to process
+            return True
+        else:
+            print(f"  ❌ Failed to delete policy: {adguard_policy_name}")
+            print(f"     Status: {del_response.status_code}")
+            print(f"     Response: {del_response.text}")
+            return False
+    else:
+        print("No existing AdGuard DNS policy found")
+        return True
+
+
 def delete_existing_adguard_lists(auto_approve=False):
     """Delete any existing AdGuard lists to allow fresh upload."""
     print("Checking for existing AdGuard lists...")
@@ -274,7 +330,12 @@ Examples:
         print("DRY RUN: Skipping actual upload")
         return 0
 
-    # Check for and optionally delete existing AdGuard lists
+    # Delete existing policy FIRST (lists cannot be deleted while referenced by a policy)
+    if not delete_existing_adguard_policy(args.auto_approve):
+        print("❌ Cannot proceed without deleting existing policy")
+        sys.exit(1)
+
+    # Now delete existing AdGuard lists
     delete_existing_adguard_lists(args.auto_approve)
 
     # Find all CSV files in the lists/ directory
