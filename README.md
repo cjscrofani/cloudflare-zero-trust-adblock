@@ -1,412 +1,326 @@
-# AdGuard DNS Filter to Cloudflare Zero Trust
+# Network-wide ad blocking with Cloudflare Zero Trust
 
-Block ads, trackers, and malicious websites across your entire network using [AdGuard DNS Filter](https://github.com/AdguardTeam/FiltersRegistry) deployed to Cloudflare Zero Trust Gateway.
+[![CI](https://github.com/cjscrofani/cloudflare-zero-trust-adblock/actions/workflows/ci.yml/badge.svg)](https://github.com/cjscrofani/cloudflare-zero-trust-adblock/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python 3.8+](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/downloads/)
+[![Last commit](https://img.shields.io/github/last-commit/cjscrofani/cloudflare-zero-trust-adblock)](https://github.com/cjscrofani/cloudflare-zero-trust-adblock/commits/main)
+[![GitHub stars](https://img.shields.io/github/stars/cjscrofani/cloudflare-zero-trust-adblock?style=flat)](https://github.com/cjscrofani/cloudflare-zero-trust-adblock/stargazers)
 
-> **Warning:** This blocklist is comprehensive (144K+ domains) and may impact website functionality. Test in a controlled environment before deploying broadly.
+Block ads, trackers, and malicious domains on every device, on every network, using [Cloudflare Zero Trust](https://www.cloudflare.com/zero-trust/) Gateway as a DNS filter. This project takes the [AdGuard DNS filter](https://github.com/AdguardTeam/FiltersRegistry) (roughly 185,000 domains), splits it into Cloudflare Gateway lists, and uploads them behind a **single** DNS block policy via the API.
+
+It is a free, hardware-free alternative to running a Pi-hole, AdGuard Home, or paying for NextDNS. Cloudflare's free Zero Trust plan covers up to 50 users, and the [WARP client](https://developers.cloudflare.com/cloudflare-one/connections/connect-devices/warp/) or [DNS-over-HTTPS](https://developers.cloudflare.com/cloudflare-one/connections/connect-devices/agentless/dns/) extends protection to phones and laptops away from home.
+
+> **Warning:** The AdGuard DNS filter is aggressive. Some sites and apps will break. Test in a controlled environment before rolling it out to a whole household or team.
+
+## Table of contents
+
+- [Features](#features)
+- [How it compares](#how-it-compares)
+- [Requirements](#requirements)
+- [Quick start](#quick-start)
+- [Automated updates with GitHub Actions](#automated-updates-with-github-actions)
+- [Automated updates with cron](#automated-updates-with-cron)
+- [Configuration](#configuration)
+- [Manual upload](#manual-upload)
+- [How it works](#how-it-works)
+- [Troubleshooting](#troubleshooting)
+- [Command reference](#command-reference)
+- [Cloudflare reference](#cloudflare-reference)
+- [Security notes](#security-notes)
+- [Contributing](#contributing)
+- [License](#license)
 
 ## Features
 
-- **144,452 domains + 66 IPs** from AdGuard DNS Filter
-- **One-click deployment** via automated API upload
-- **Single DNS policy** blocks all domains (not 499 separate rules!)
-- Automatically separates domains from IP addresses
-- Optimized for Cloudflare Standard plan (1,000 entries per list)
-- Enterprise plan support (5,000 entries per list)
-- Easy updates - just re-run the script
+- **~185K domains and ~70 IPs** from the AdGuard DNS filter, refreshed on every run
+- **One DNS policy** instead of hundreds of regex rules
+- **Fully automated deployment** through the Cloudflare API, with an interactive mode and a non-interactive mode for schedulers
+- **Dry run** flag to validate credentials before touching your account
+- **GitHub Actions workflow** included, so updates can run weekly with no server of your own
+- Domains and IPs are separated automatically into the correct Gateway list types
+- Tuned for the Standard plan limit of 1,000 entries per list, with a one-line switch for Enterprise
+- Works with any AdGuard-formatted filter list, not just the default
+
+## How it compares
+
+| | This project | [cloudflare-gateway-pihole-scripts](https://github.com/mrrfv/cloudflare-gateway-pihole-scripts) | Pi-hole / AdGuard Home | NextDNS |
+|---|---|---|---|---|
+| Language | Python | JavaScript / Node | Any (self-hosted) | Hosted |
+| Hardware needed | None | None | Yes | None |
+| Default blocklist | AdGuard DNS filter | Configurable (several) | Configurable | Built-in |
+| Policies created | 1 | 1 or more | n/a | n/a |
+| Protects devices off-network | Yes, via WARP or DoH | Yes, via WARP or DoH | Only with a VPN | Yes |
+| Cost | Free (Cloudflare free plan) | Free | Hardware + power | Free tier, then paid |
+
+Pick this project if you want a minimal Python tool that does one thing: keep the AdGuard DNS filter deployed to your Cloudflare account.
 
 ## Requirements
 
-- Python 3.6+
-- Cloudflare Zero Trust account (Free plan works!)
-- API credentials (instructions below)
+- Python 3.8 or newer
+- A [Cloudflare Zero Trust](https://one.dash.cloudflare.com/) account. The free plan works.
+- A Cloudflare API token with Zero Trust edit permissions (instructions below)
 
-## Quick Start
+## Quick start
 
-### 1. Install Dependencies
+### 1. Clone and install
 
 ```bash
+git clone https://github.com/cjscrofani/cloudflare-zero-trust-adblock.git
+cd cloudflare-zero-trust-adblock
 pip install -r requirements.txt
 ```
 
-Or install manually:
-```bash
-pip install requests python-dotenv
-```
-
-### 2. Set Up Cloudflare Credentials
+### 2. Add your Cloudflare credentials
 
 ```bash
-# Copy the template
 cp .env.example .env
-
-# Edit with your credentials
-nano .env
 ```
 
-Add your Cloudflare credentials:
+Edit `.env` and fill in:
+
 ```env
 CLOUDFLARE_ACCOUNT_ID=your-account-id
 CLOUDFLARE_API_TOKEN=your-api-token
 ```
 
-**How to get credentials:**
-- **Account ID:** Cloudflare Dashboard → Zero Trust → Settings
-- **API Token:** Cloudflare Dashboard → My Profile → API Tokens
-  - Click "Create Token"
-  - Use "Edit Cloudflare Zero Trust" template
+Where to find them:
 
-### 3. Generate the Lists
+- **Account ID:** Cloudflare dashboard, then Zero Trust, then Settings
+- **API token:** Cloudflare dashboard, then My Profile, then API Tokens, then Create Token. Use the **Edit Cloudflare Zero Trust** template.
+
+### 3. Generate the lists
 
 ```bash
 python3 generate-lists.py
 ```
 
-This downloads the latest AdGuard DNS filter and creates:
-- 145 domain CSV files (1,000 entries each)
-- 1 IP CSV file (66 entries)
-- All files saved to `lists/` folder
-
-**Example output:**
-```
-Fetching filter list from: https://raw.githubusercontent.com/...
-Downloaded 180237 lines
-Processed 144452 unique domains and 66 unique IPs
-Split into 145 domain lists and 1 IP lists
-  (max 1000 entries per list)
-
-Creating domain CSV files for Cloudflare import...
-  - lists/adguard_domains_1.csv: 1000 domains
-  - lists/adguard_domains_2.csv: 1000 domains
-  ...
-  - lists/adguard_domains_145.csv: 452 domains
-
-Creating IP CSV files for Cloudflare import...
-  - lists/adguard_ips_1.csv: 66 domains
-
-SUCCESS! Files created
-```
+This downloads the current AdGuard DNS filter, strips it down to plain domains and IPs, and writes one CSV per 1,000 entries into the `lists/` folder. Expect around 185 domain files and 1 IP file.
 
 ### 4. Upload to Cloudflare
 
-**Option A: Automated Upload (Recommended)**
+Check credentials first without changing anything:
+
+```bash
+python3 upload_to_cloudflare.py --dry-run
+```
+
+Then deploy:
 
 ```bash
 python3 upload_to_cloudflare.py
 ```
 
-This automatically:
-- Creates 146 Gateway Lists in Cloudflare
-- Uploads all domains and IPs
-- Creates a single DNS policy blocking everything
-- Enables the policy
+The script creates the Gateway lists, uploads every entry, creates a DNS policy named **Block AdGuard DNS Filter** that references all of them, and enables it. On later runs it offers to delete the previous AdGuard lists first.
 
-**Option B: Test First (Dry Run)**
+### 5. Point your devices at Cloudflare
+
+Blocking only applies to DNS traffic that reaches your Gateway. The simplest options:
+
+- Install the [WARP client](https://developers.cloudflare.com/cloudflare-one/connections/connect-devices/warp/deployment/manual-deployment/) and enroll in your Zero Trust organization
+- Use your Gateway [DNS-over-HTTPS endpoint](https://developers.cloudflare.com/cloudflare-one/connections/connect-devices/agentless/dns/) in a browser or OS that supports it
+- Set your Gateway IPv6 or DoH location on a router
+
+## Automated updates with GitHub Actions
+
+The repository ships with a workflow at `.github/workflows/update-blocklist.yml` that regenerates and re-uploads the lists every Sunday at 02:00 UTC, and can be triggered by hand from the Actions tab. No server required.
+
+1. **Fork** this repository.
+2. In your fork, go to **Settings**, then **Secrets and variables**, then **Actions**, and add two repository secrets:
+   - `CLOUDFLARE_ACCOUNT_ID`
+   - `CLOUDFLARE_API_TOKEN`
+3. Go to the **Actions** tab and enable workflows for the fork.
+4. Open **Update blocklist** and click **Run workflow** to do the first deployment.
+
+The workflow runs `generate-lists.py` and then `upload_to_cloudflare.py --auto-approve`, which deletes the old AdGuard lists and replaces them. Because the lists are replaced rather than edited, there is a short window during each run where the policy references lists that no longer exist. Schedule it for a quiet hour.
+
+## Automated updates with cron
+
+If you would rather run it on a machine you control:
 
 ```bash
-# See what would be uploaded without making changes
-python3 upload_to_cloudflare.py --dry-run
+crontab -e
 ```
 
-**Option C: Manual Upload**
+Add a line like this, adjusting the paths:
 
-If you prefer to upload manually, see [Manual Upload](#manual-upload-alternative) section below.
+```cron
+0 2 * * 0 cd /path/to/cloudflare-zero-trust-adblock && /usr/bin/python3 generate-lists.py && /usr/bin/python3 upload_to_cloudflare.py --auto-approve >> /var/log/adguard-update.log 2>&1
+```
 
-**Done!** Your network is now protected.
+Use `which python3` to find the interpreter path. The `--auto-approve` flag (or `-y`) skips every prompt.
 
 ## Configuration
 
-### Enterprise Plan (5,000 entries per list)
+### Enterprise plan
 
-Edit `generate-lists.py` line 20:
+Enterprise accounts allow 5,000 entries per list. Change line 20 of `generate-lists.py`:
 
 ```python
 MAX_DOMAINS_PER_LIST = 5000
 ```
 
-This reduces the number of lists from 145 to ~30.
+This cuts the list count from roughly 185 to roughly 37.
 
-### Custom Filter Source
+### Custom filter source
 
-Use any AdGuard-formatted filter:
+Any AdGuard-syntax filter works, from a URL or a local file:
 
 ```bash
 python3 generate-lists.py https://example.com/custom-filter.txt
-```
-
-## Updating the Filter
-
-### Manual Update
-
-To get the latest AdGuard DNS filter:
-
-```bash
-# Regenerate lists
-python3 generate-lists.py
-
-# Re-upload to Cloudflare (interactive)
-python3 upload_to_cloudflare.py
-```
-
-The script will offer to delete existing lists before uploading new ones.
-
-### Automated Updates (Optional)
-
-For automatic updates via cron job, use the `--auto-approve` flag:
-
-```bash
-# Non-interactive mode (skips all prompts)
-python3 upload_to_cloudflare.py --auto-approve
-```
-
-**Example cron job** (updates weekly on Sunday at 2 AM):
-
-```bash
-# Edit crontab
-crontab -e
-
-# Add this line (adjust paths to match your system):
-0 2 * * 0 cd /path/to/cfzt-adblock-dns-firewall && /usr/bin/python3 generate-lists.py && /usr/bin/python3 upload_to_cloudflare.py --auto-approve >> /var/log/adguard-update.log 2>&1
-```
-
-**Find your python3 path:**
-```bash
-which python3
-# Use this full path in your cron job
-```
-
-This automatically:
-- Downloads the latest AdGuard filter
-- Generates fresh CSV files
-- Deletes old Cloudflare lists
-- Uploads new lists
-- Updates the DNS policy
-
-## Manual Upload (Alternative)
-
-If you prefer manual upload over API:
-
-### 1. Upload Domain Lists
-
-1. Go to **My Team** → **Lists** in Cloudflare Zero Trust
-2. Click **Upload CSV**
-3. Select **List type: Hostname**
-4. Upload each `lists/adguard_domains_*.csv` file
-5. Name them: "AdGuard Domains - Part 1", "Part 2", etc.
-
-### 2. Upload IP List
-
-1. Click **Upload CSV**
-2. Select **List type: IP**
-3. Upload `lists/adguard_ips_1.csv`
-4. Name it: "AdGuard IPs"
-
-### 3. Create DNS Policy
-
-1. Go to **Gateway** → **Firewall Policies** → **DNS**
-2. Click **Add a policy**
-3. Configure:
-   - **Name:** "Block AdGuard DNS Filter"
-   - **Traffic:** Add all lists with OR conditions
-   - **Action:** Block
-4. Save
-
-## Troubleshooting
-
-### Installation Issues
-
-**"No module named 'requests'"**
-```bash
-pip install -r requirements.txt
-```
-
-**"python3: command not found"**
-
-Use `python` instead of `python3`, or install Python 3.6+.
-
-### Configuration Issues
-
-**"No CSV files found"**
-
-Run `python3 generate-lists.py` first to create the lists.
-
-**"Missing Cloudflare credentials"**
-
-Create a `.env` file with your credentials:
-```bash
-cp .env.example .env
-nano .env  # Add your actual credentials
-```
-
-### API Errors
-
-**"invalid list type"**
-
-The API type should be `DOMAIN` for domains and `IP` for IPs. The script handles this automatically.
-
-**"list has type IP but should have type Host"**
-
-You're using `dns.domains[*]` with an IP list. Use `dns.resolved_ips[*]` instead. The upload script handles this correctly.
-
-**"cannot have list with over 1000 items"**
-
-You're on a Standard plan. Keep `MAX_DOMAINS_PER_LIST = 1000` (default).
-
-**"A resource with this identifier already exists"**
-
-You have existing lists. The script will prompt to delete them, or use:
-```bash
-python3 upload_to_cloudflare.py --auto-approve
-```
-
-## How It Works
-
-### Architecture
-
-1. **Gateway Lists** (146 total):
-   - 145 domain lists (type: `DOMAIN`)
-   - 1 IP list (type: `IP`)
-   - Max 1,000 entries per list (Standard plan)
-
-2. **Single DNS Policy**:
-   - Combines all 146 lists with OR conditions
-   - Domain lists: `any(dns.domains[*] in $list_id)`
-   - IP lists: `any(dns.resolved_ips[*] in $list_id)`
-   - Action: Block
-
-### Why Gateway Lists?
-
-| Approach | Rules Needed | Maintenance | Recommended |
-|----------|-------------|-------------|-------------|
-| **Gateway Lists** | 1 policy | Easy | ✅ Yes |
-| Regex patterns | 499 policies | Hard | ❌ No |
-
-### Alternative: Regex Method
-
-For those who prefer regex patterns over Gateway Lists:
-
-```bash
-python3 domain-lists-dc.py
-```
-
-This generates 499 regex files (`blocklist_*.txt`) with 6,500 character limit each. You'll need to create 499 separate DNS policies in Cloudflare.
-
-**Note:** Gateway Lists method is strongly recommended over regex.
-
-## Files in This Repository
-
-```
-.
-├── generate-lists.py           # Main script: generates CSV files
-├── upload_to_cloudflare.py     # Upload script: API automation
-├── domain-lists-dc.py          # Alternative: regex pattern generator
-├── requirements.txt            # Python dependencies
-├── .env.example                # Credentials template
-├── .gitignore                  # Excludes sensitive data
-├── LICENSE                     # MIT License
-├── README.md                   # This file
-└── lists/                      # Generated CSV files (gitignored)
-    ├── adguard_domains_*.csv   # Domain lists (145 files)
-    └── adguard_ips_1.csv       # IP list (1 file)
-```
-
-### What Gets Generated
-
-These files are automatically downloaded/created when you run the scripts:
-
-- `filter.txt` - Downloaded AdGuard DNS filter (3.6 MB, gitignored)
-- `lists/adguard_domains_1.csv` through `lists/adguard_domains_145.csv`
-- `lists/adguard_ips_1.csv`
-
-All generated files are gitignored and not tracked in the repository.
-
-## Command Reference
-
-### generate-lists.py
-
-```bash
-# Use default AdGuard filter
-python3 generate-lists.py
-
-# Use custom filter
-python3 generate-lists.py https://example.com/filter.txt
 python3 generate-lists.py ./local-filter.txt
 ```
 
-### upload_to_cloudflare.py
+Only plain `||domain.com^` rules are kept. Rules with paths, modifiers, or wildcards are skipped because Gateway lists do not support them.
+
+## Manual upload
+
+If you prefer not to use the API:
+
+1. Run `python3 generate-lists.py` to create the CSV files.
+2. In Zero Trust, go to **My Team**, then **Lists**, and click **Upload CSV**.
+3. For each `lists/adguard_domains_*.csv`, choose list type **Hostname** and name it "AdGuard Domains - Part N".
+4. For `lists/adguard_ips_1.csv`, choose list type **IP** and name it "AdGuard IPs".
+5. Go to **Gateway**, then **Firewall Policies**, then **DNS**, and add a policy named "Block AdGuard DNS Filter" with every list joined by OR and the action set to **Block**.
+
+## How it works
+
+1. `generate-lists.py` downloads the filter, parses each `||domain^` line, discards anything Gateway lists cannot express, deduplicates, and splits the result into CSVs of at most 1,000 entries.
+2. `upload_to_cloudflare.py` creates one Gateway list per CSV (type `DOMAIN` for hostnames, type `IP` for addresses), appends the entries, then creates one DNS policy whose traffic expression ORs every list together:
+
+```text
+any(dns.domains[*] in $list_1) or any(dns.domains[*] in $list_2) or ... or any(dns.resolved_ips[*] in $ip_list_1)
+```
+
+### Why Gateway lists instead of regex policies?
+
+| Approach | Policies needed | Maintenance |
+|---|---|---|
+| Gateway lists (this project) | 1 | Re-run the script |
+| Regex patterns | ~500 | Painful |
+
+A regex generator is still included for reference. `python3 domain-lists-dc.py` writes `blocklist_*.txt` files that fit Cloudflare's 6,500-character limit per DNS policy. You would need to create one policy per file by hand, so the lists method is strongly recommended.
+
+### Repository layout
+
+```text
+.
+├── generate-lists.py            Download the filter and write CSV lists
+├── upload_to_cloudflare.py      Create Gateway lists and the DNS policy via API
+├── domain-lists-dc.py           Alternative regex generator (not recommended)
+├── requirements.txt             Python dependencies
+├── .env.example                 Credentials template
+├── .github/workflows/           CI and scheduled update workflows
+└── lists/                       Generated CSV files (gitignored)
+```
+
+## Troubleshooting
+
+**`No module named 'requests'`**
+Run `pip install -r requirements.txt`.
+
+**`No CSV files found`**
+Run `python3 generate-lists.py` before the upload script.
+
+**`Missing Cloudflare credentials`**
+Copy `.env.example` to `.env` and fill in real values. In GitHub Actions, check that both secrets are set on the fork, not the upstream repo.
+
+**`invalid list type`**
+Gateway's API expects `DOMAIN` for hostnames and `IP` for addresses. The upload script sets these correctly. If you edited the script, check the `list_type` arguments.
+
+**`list has type IP but should have type Host`**
+A `dns.domains[*]` selector was used with an IP list. IP lists need `dns.resolved_ips[*]`. The upload script handles this.
+
+**`cannot have list with over 1000 items`**
+You are on the Standard plan. Keep `MAX_DOMAINS_PER_LIST = 1000`.
+
+**`A resource with this identifier already exists`**
+Lists from a previous run are still present. Re-run the upload script and answer yes to the delete prompt, or pass `--auto-approve`.
+
+**A site I need is blocked**
+Create a second DNS policy in Zero Trust with action **Allow** for that domain and place it above the block policy. Policies are evaluated top to bottom.
+
+## Command reference
 
 ```bash
-# Interactive mode (prompts for confirmation)
+# Generate lists from the default AdGuard DNS filter
+python3 generate-lists.py
+
+# Generate lists from a custom source
+python3 generate-lists.py https://example.com/filter.txt
+python3 generate-lists.py ./local-filter.txt
+
+# Upload interactively
 python3 upload_to_cloudflare.py
 
-# Non-interactive mode (for cron jobs)
+# Upload without prompts (cron, CI)
 python3 upload_to_cloudflare.py --auto-approve
-python3 upload_to_cloudflare.py -y  # short form
+python3 upload_to_cloudflare.py -y
 
-# Dry run (show what would be uploaded)
+# Validate credentials only
 python3 upload_to_cloudflare.py --dry-run
 
-# Get help
+# Help
 python3 upload_to_cloudflare.py --help
 ```
 
-## Cloudflare Reference
+## Cloudflare reference
 
-### Gateway List Types
+### Gateway list types
 
-| UI Name | API Type | Used For | Example |
-|---------|----------|----------|---------|
-| Hostname | `DOMAIN` | Domain blocking | `ads.example.com` |
-| IP | `IP` | IP blocking | `198.23.198.110` |
-| URL | `URL` | URL filtering | `https://example.com/path` |
-| Email | `EMAIL` | Email filtering | `spam@example.com` |
+| Dashboard name | API type | Used for |
+|---|---|---|
+| Hostname | `DOMAIN` | Domain blocking |
+| IP | `IP` | IP blocking |
+| URL | `URL` | URL filtering |
+| Email | `EMAIL` | Email filtering |
 
-**Important:** Use `DOMAIN` type for domains (not `HOSTNAME`). The UI shows "Hostname" but the API uses `DOMAIN`.
+The dashboard says "Hostname" but the API wants `DOMAIN`. Sending `HOSTNAME` returns `invalid list type`.
 
-### List Limits
+### List limits
 
-| Plan | Entries/List | File Size | Total Lists |
-|------|-------------|-----------|-------------|
-| Standard | 1,000 | 2 MB | Unlimited |
-| Enterprise | 5,000 | 2 MB | Unlimited |
+| Plan | Entries per list | Max file size |
+|---|---|---|
+| Standard | 1,000 | 2 MB |
+| Enterprise | 5,000 | 2 MB |
 
-### DNS Policy Traffic Selectors
+### DNS policy selectors
 
-```javascript
-// For domain lists
-any(dns.domains[*] in $list_id)
-
-// For IP lists
-any(dns.resolved_ips[*] in $list_id)
+```text
+any(dns.domains[*] in $list_id)        # domain lists
+any(dns.resolved_ips[*] in $list_id)   # IP lists
 ```
 
-**Common mistake:** Using `dns.domains[*]` for IP lists will cause an error: "list has type IP but should have type Host"
+### Documentation
 
-## Security Notes
+- [Cloudflare Zero Trust](https://developers.cloudflare.com/cloudflare-one/)
+- [Gateway lists](https://developers.cloudflare.com/cloudflare-one/policies/gateway/lists/)
+- [DNS policies](https://developers.cloudflare.com/cloudflare-one/policies/gateway/dns-policies/)
+- [Gateway rules API](https://developers.cloudflare.com/api/resources/zero_trust/subresources/gateway/subresources/rules/)
+- [AdGuard DNS filter](https://github.com/AdguardTeam/FiltersRegistry)
 
-- `.env` is gitignored - never commit credentials
-- `.env.example` contains only placeholder values
-- The upload script validates credentials before starting
-- API token should use "Edit Cloudflare Zero Trust" permission template
-- All generated files (`filter.txt`, CSV files) are gitignored
+## Security notes
 
-## Resources
+- `.env` is gitignored. Never commit it.
+- Scope the API token to Zero Trust only. The **Edit Cloudflare Zero Trust** template is sufficient.
+- In GitHub Actions, credentials live in repository secrets and are never written to the log.
+- All generated files (`lists/`, `filter.txt`, `blocklist_*.txt`) are gitignored.
+- See [SECURITY.md](.github/SECURITY.md) for how to report a vulnerability.
 
-- [AdGuard DNS Filter](https://github.com/AdguardTeam/FiltersRegistry)
-- [Cloudflare Zero Trust Docs](https://developers.cloudflare.com/cloudflare-one/)
-- [DNS Policies Documentation](https://developers.cloudflare.com/cloudflare-one/policies/gateway/dns-policies/)
-- [Gateway API Reference](https://developers.cloudflare.com/api/operations/zero-trust-gateway-rules-create-zero-trust-gateway-rule)
+## Contributing
+
+Bug reports, filter suggestions, and pull requests are welcome. See [CONTRIBUTING.md](.github/CONTRIBUTING.md) for the short version of how to get started.
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) file for details.
+MIT. See [LICENSE](LICENSE).
 
-The AdGuard DNS Filter has its own license - see the [AdGuard Filters Repository](https://github.com/AdguardTeam/AdguardFilters).
+The AdGuard DNS filter is maintained by AdGuard and distributed under its own terms. See the [AdGuard filters repository](https://github.com/AdguardTeam/AdguardFilters).
 
 ## Disclaimer
 
-Use at your own risk. Blocking 144K+ domains may break website functionality. Always test in a controlled environment before production deployment.
+Use at your own risk. Blocking this many domains will affect some websites and apps. Test before deploying to people who depend on the network.
 
 ## Credits
 
-- AdGuard Team for maintaining the DNS filter
+- The AdGuard team for maintaining the DNS filter
 - Cloudflare for Zero Trust Gateway

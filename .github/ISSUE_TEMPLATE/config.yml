@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Troubleshooting guide
+    url: https://github.com/cjscrofani/cloudflare-zero-trust-adblock#troubleshooting
+    about: Common API errors and their fixes
+  - name: Cloudflare Zero Trust documentation
+    url: https://developers.cloudflare.com/cloudflare-one/policies/gateway/
+    about: Official docs for Gateway lists and DNS policies

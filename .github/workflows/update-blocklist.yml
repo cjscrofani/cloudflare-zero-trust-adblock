@@ -1,0 +1,46 @@
+name: Update blocklist
+
+# Regenerates the AdGuard DNS filter lists and re-uploads them to Cloudflare
+# Zero Trust. Requires two repository secrets:
+#   CLOUDFLARE_ACCOUNT_ID
+#   CLOUDFLARE_API_TOKEN
+#
+# Runs weekly and on demand from the Actions tab.
+
+on:
+  schedule:
+    - cron: "0 2 * * 0" # Sundays at 02:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: update-blocklist
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Generate lists
+        run: python3 generate-lists.py
+
+      - name: Upload to Cloudflare
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: python3 upload_to_cloudflare.py --auto-approve

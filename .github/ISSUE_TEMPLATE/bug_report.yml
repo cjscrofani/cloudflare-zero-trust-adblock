@@ -1,0 +1,46 @@
+name: Bug report
+description: Something in the scripts or workflow is not working
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please check the Troubleshooting section of the README first, since the most common API errors are listed there.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you run, and what did you expect to happen instead?
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Script output
+      description: Paste the relevant output. Redact your account ID and never paste your API token.
+      render: shell
+  - type: dropdown
+    id: how-run
+    attributes:
+      label: How are you running it?
+      options:
+        - Locally (interactive)
+        - Locally via cron
+        - GitHub Actions workflow
+        - Manual upload in the dashboard
+    validations:
+      required: true
+  - type: dropdown
+    id: plan
+    attributes:
+      label: Cloudflare Zero Trust plan
+      options:
+        - Free
+        - Standard
+        - Enterprise
+        - Not sure
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+      placeholder: "3.12.1"

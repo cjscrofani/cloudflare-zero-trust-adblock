@@ -1,0 +1,60 @@
+name: CI
+
+# Verifies that the generator still parses the live AdGuard filter and that
+# the upload script's dry run accepts the resulting files. No secrets needed.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        python-version: ["3.8", "3.12"]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Compile scripts
+        run: python3 -m py_compile generate-lists.py upload_to_cloudflare.py domain-lists-dc.py
+
+      - name: Generate lists from live filter
+        run: python3 generate-lists.py
+
+      - name: Check output
+        run: |
+          domain_files=$(ls lists/adguard_domains_*.csv | wc -l)
+          ip_files=$(ls lists/adguard_ips_*.csv 2>/dev/null | wc -l)
+          echo "Domain files: $domain_files"
+          echo "IP files: $ip_files"
+          test "$domain_files" -gt 50
+          # Every file must respect the Standard plan limit
+          for f in lists/*.csv; do
+            n=$(wc -l < "$f")
+            if [ "$n" -gt 1000 ]; then
+              echo "$f has $n lines (limit 1000)"; exit 1
+            fi
+          done
+
+      - name: Upload script dry run
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ci-placeholder
+          CLOUDFLARE_API_TOKEN: ci-placeholder
+        run: python3 upload_to_cloudflare.py --dry-run
