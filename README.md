@@ -234,7 +234,7 @@ A `dns.domains[*]` selector was used with an IP list. IP lists need `dns.resolve
 You are on the Standard plan. Keep `MAX_DOMAINS_PER_LIST = 1000`.
 
 **`A resource with this identifier already exists`**
-Lists from a previous run are still present. Re-run the upload script and answer yes to the delete prompt, or pass `--auto-approve`.
+Lists from a previous run are still present. Gateway will not delete a list while a policy references it, so the upload script deletes the existing **Block AdGuard DNS Filter** policy first, then the lists. Re-run the script and answer yes to both delete prompts, or pass `--auto-approve`. If a list still fails to delete, the script now prints the API response so you can see why.
 
 **A site I need is blocked**
 Create a second DNS policy in Zero Trust with action **Allow** for that domain and place it above the block policy. Policies are evaluated top to bottom.

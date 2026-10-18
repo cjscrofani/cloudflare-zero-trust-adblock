@@ -73,6 +73,59 @@ def get_existing_lists() -> Dict[str, str]:
         return {}
 
 
+def get_existing_policies(policy_name: str) -> List[str]:
+    """Return IDs of Gateway rules whose name matches policy_name."""
+    url = f"{BASE_URL}/gateway/rules"
+    response = requests.get(url, headers=HEADERS)
+
+    if response.status_code == 200:
+        rules = response.json()["result"] or []
+        return [rule["id"] for rule in rules if rule.get("name") == policy_name]
+    else:
+        return []
+
+
+def delete_existing_policy(policy_name: str, auto_approve=False):
+    """
+    Delete any existing DNS policy with the given name.
+
+    Gateway refuses to delete a list while a policy references it, so the
+    policy has to go before the lists it points at.
+    """
+    print(f"Checking for existing policy '{policy_name}'...")
+
+    rule_ids = get_existing_policies(policy_name)
+    if not rule_ids:
+        print("  No existing policy found")
+        print()
+        return
+
+    print(f"Found {len(rule_ids)} existing policy")
+
+    if auto_approve:
+        print("Auto-approving policy deletion (--auto-approve enabled)")
+    else:
+        response = input("Delete this policy before uploading? (yes/no): ").strip().lower()
+        if response not in ['yes', 'y']:
+            print("⚠️  Warning: Lists used by the existing policy cannot be deleted")
+            print()
+            return
+
+    for rule_id in rule_ids:
+        url = f"{BASE_URL}/gateway/rules/{rule_id}"
+        del_response = requests.delete(url, headers=HEADERS)
+
+        if del_response.status_code == 200:
+            print(f"  ✅ Deleted policy {rule_id}")
+        else:
+            print(f"  ❌ Failed to delete policy {rule_id}")
+            print(f"     Status: {del_response.status_code}")
+            print(f"     Response: {del_response.text}")
+            sys.exit(1)
+
+    print()
+
+
 def delete_existing_adguard_lists(auto_approve=False):
     """Delete any existing AdGuard lists to allow fresh upload."""
     print("Checking for existing AdGuard lists...")
@@ -91,6 +144,7 @@ def delete_existing_adguard_lists(auto_approve=False):
             response = input("Delete these lists before uploading? (yes/no): ").strip().lower()
 
         if response in ['yes', 'y']:
+            failed = 0
             for name, list_id in adguard_lists.items():
                 url = f"{BASE_URL}/gateway/lists/{list_id}"
                 del_response = requests.delete(url, headers=HEADERS)
@@ -98,9 +152,16 @@ def delete_existing_adguard_lists(auto_approve=False):
                 if del_response.status_code == 200:
                     print(f"  ✅ Deleted: {name}")
                 else:
+                    failed += 1
                     print(f"  ❌ Failed to delete: {name}")
+                    print(f"     Status: {del_response.status_code}")
+                    print(f"     Response: {del_response.text}")
 
             print()
+            if failed:
+                print(f"❌ {failed} list(s) could not be deleted. "
+                      "Re-creating them would fail with a name conflict, so stopping here.")
+                sys.exit(1)
         else:
             print("⚠️  Warning: Existing lists may cause conflicts")
             print()
@@ -274,6 +335,11 @@ Examples:
         print("DRY RUN: Skipping actual upload")
         return 0
 
+    policy_name = "Block AdGuard DNS Filter"
+
+    # The policy must go first: Gateway will not delete a list a policy uses.
+    delete_existing_policy(policy_name, args.auto_approve)
+
     # Check for and optionally delete existing AdGuard lists
     delete_existing_adguard_lists(args.auto_approve)
 
@@ -370,7 +436,6 @@ Examples:
     print("Step 3: Creating DNS Policy")
     print("=" * 70)
 
-    policy_name = "Block AdGuard DNS Filter"
     create_dns_policy(list_ids, policy_name, len(domain_files))
 
     # Summary
