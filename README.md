@@ -86,7 +86,11 @@ CLOUDFLARE_API_TOKEN=your-api-token
 Where to find them:
 
 - **Account ID:** Cloudflare dashboard, then Zero Trust, then Settings
-- **API token:** Cloudflare dashboard, then My Profile, then API Tokens, then Create Token. Use the **Edit Cloudflare Zero Trust** template.
+- **API token:** Cloudflare dashboard, then My Profile, then API Tokens, then Create Token. Either:
+  - **Custom token (recommended):** under Create Custom Token, add one permission: **Account**, **Zero Trust**, **Edit**. Under Account Resources choose your specific account rather than all accounts. Leave IP filtering empty if the token will be used from GitHub Actions. This is the smallest scope the upload script needs.
+  - **Template:** use the **Edit Cloudflare Zero Trust** template. It works but grants more than this project uses.
+
+  Cloudflare shows the token once. Store it in a password manager.
 
 ### 3. Generate the lists
 
@@ -125,13 +129,20 @@ Blocking only applies to DNS traffic that reaches your Gateway. The simplest opt
 The repository ships with a workflow at `.github/workflows/update-blocklist.yml` that regenerates and re-uploads the lists every Sunday at 02:00 UTC, and can be triggered by hand from the Actions tab. No server required.
 
 1. **Fork** this repository.
-2. In your fork, go to **Settings**, then **Secrets and variables**, then **Actions**, and add two repository secrets:
-   - `CLOUDFLARE_ACCOUNT_ID`
-   - `CLOUDFLARE_API_TOKEN`
-3. Go to the **Actions** tab and enable workflows for the fork.
-4. Open **Update blocklist** and click **Run workflow** to do the first deployment.
+2. Add two repository secrets, `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN`, using the values from [step 2 of Quick start](#2-add-your-cloudflare-credentials). Either:
+   - In your fork, go to **Settings**, then **Secrets and variables**, then **Actions**, and add them there, or
+   - With the [GitHub CLI](https://cli.github.com/) run the following from the repo and paste each value when prompted:
 
-The workflow runs `generate-lists.py` and then `upload_to_cloudflare.py --auto-approve`, which deletes the old AdGuard lists and replaces them. Because the lists are replaced rather than edited, there is a short window during each run where the policy references lists that no longer exist. Schedule it for a quiet hour.
+     ```bash
+     gh secret set CLOUDFLARE_ACCOUNT_ID
+     gh secret set CLOUDFLARE_API_TOKEN
+     ```
+3. Go to the **Actions** tab and enable workflows for the fork.
+4. Open **Update blocklist** and click **Run workflow** to do the first deployment. A full run takes about 6 minutes.
+
+The workflow runs `generate-lists.py` and then `upload_to_cloudflare.py --auto-approve`. The upload script deletes the existing **Block AdGuard DNS Filter** policy, deletes the old AdGuard lists, uploads fresh ones, and recreates the policy. For the few minutes between deleting and recreating the policy, nothing is blocked. Schedule it for a quiet hour.
+
+GitHub emails you when a scheduled run fails. To investigate, open the run from the **Actions** tab, or run `gh run list --workflow "Update blocklist"` and `gh run view <id> --log-failed`. The upload script prints the Cloudflare API response for any failed request.
 
 ## Automated updates with cron
 
@@ -301,7 +312,8 @@ any(dns.resolved_ips[*] in $list_id)   # IP lists
 ## Security notes
 
 - `.env` is gitignored. Never commit it.
-- Scope the API token to Zero Trust only. The **Edit Cloudflare Zero Trust** template is sufficient.
+- Scope the API token to Zero Trust only, and to a single account. A custom token with just **Account, Zero Trust, Edit** is enough; the **Edit Cloudflare Zero Trust** template also works but is broader.
+- If a token is ever exposed, roll it from **My Profile**, then **API Tokens**, and update the repository secret.
 - In GitHub Actions, credentials live in repository secrets and are never written to the log.
 - All generated files (`lists/`, `filter.txt`, `blocklist_*.txt`) are gitignored.
 - See [SECURITY.md](.github/SECURITY.md) for how to report a vulnerability.
